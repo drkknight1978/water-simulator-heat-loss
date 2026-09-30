@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Water Heat Loss Simulator</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="app-header">
+    <h1>Water Heat Loss Simulator</h1>
+    <p>Watch a container of hot water cool down. Change the shape, size, material and lid, then speed up time.</p>
+  </header>
+
+  <main class="layout">
+    <section class="panel controls" aria-labelledby="setup-heading">
+      <h2 id="setup-heading">Setup</h2>
+
+      <div class="control">
+        <label for="waterTemp">Starting water temperature <output id="waterTempOut"></output></label>
+        <input type="range" id="waterTemp" min="1" max="100" step="1" value="85">
+      </div>
+
+      <div class="control">
+        <label for="ambient">Room temperature <output id="ambientOut"></output></label>
+        <input type="range" id="ambient" min="-10" max="40" step="1" value="20">
+      </div>
+
+      <div class="control">
+        <label for="shape">Container shape</label>
+        <select id="shape"></select>
+      </div>
+
+      <div class="control">
+        <label for="size">Size (water volume) <output id="sizeOut"></output></label>
+        <input type="range" id="size" min="0" max="100" step="1" value="30">
+      </div>
+
+      <div class="control">
+        <label for="material">Container material</label>
+        <select id="material"></select>
+      </div>
+
+      <div class="control">
+        <label for="thickness">Wall thickness <output id="thicknessOut"></output></label>
+        <input type="range" id="thickness" min="0.5" max="20" step="0.5" value="5">
+      </div>
+
+      <label class="switch">
+        <input type="checkbox" id="lidded">
+        <span class="track" aria-hidden="true"></span>
+        <span>Lid on</span>
+      </label>
+
+      <label class="switch">
+        <input type="checkbox" id="preheat">
+        <span class="track" aria-hidden="true"></span>
+        <span>Pre-heat the container</span>
+      </label>
+
+      <p class="hint">Changing the starting temperature, shape, size, material, thickness or pre-heat starts a new run. The lid and room temperature can be changed while it runs.</p>
+    </section>
+
+    <section class="panel stage" aria-label="Container view">
+      <div class="time-bar">
+        <button type="button" id="playPause" class="btn primary">▶ Play</button>
+        <button type="button" id="reset" class="btn">↺ Reset</button>
+        <div class="clock"><span>Elapsed</span> <strong id="clock">0:00:00</strong></div>
+      </div>
+      <div class="time-bar">
+        <span class="group-label">Speed</span>
+        <div class="segmented" id="speeds" role="group" aria-label="Time speed"></div>
+        <span class="spacer"></span>
+        <button type="button" class="btn small" data-skip="600">+10 min</button>
+        <button type="button" class="btn small" data-skip="3600">+1 h</button>
+      </div>
+      <div class="canvas-wrap scene"><canvas id="scene"></canvas></div>
+      <label class="inline-check"><input type="checkbox" id="showArrows" checked> Show heat-flow arrows</label>
+    </section>
+
+    <section class="panel readouts" aria-labelledby="readouts-heading">
+      <h2 id="readouts-heading">Readouts</h2>
+      <div class="big-temp"><span id="tWater">--</span><span class="unit">°C</span></div>
+      <dl class="stats">
+        <dt>Cooling rate</dt><dd id="rate">--</dd>
+        <dt>Heat leaving water</dt><dd id="power">--</dd>
+        <dt>Wall temperature</dt><dd id="tWall">--</dd>
+        <dt id="tLidLabel">Lid temperature</dt><dd id="tLid">--</dd>
+        <dt>Energy lost</dt><dd id="energy">--</dd>
+        <dt>Water evaporated</dt><dd id="evap">--</dd>
+        <dt>Reached 60 °C</dt><dd id="m60">--</dd>
+        <dt>Reached 40 °C</dt><dd id="m40">--</dd>
+      </dl>
+      <h3>Where the heat is going</h3>
+      <div class="breakdown-bar" id="breakdownBar"></div>
+      <ul class="legend" id="breakdownLegend"></ul>
+    </section>
+
+    <section class="panel chart" aria-labelledby="chart-heading">
+      <div class="chart-head">
+        <h2 id="chart-heading">Temperature over time</h2>
+        <div>
+          <button type="button" id="pin" class="btn small">📌 Keep this curve</button>
+          <button type="button" id="clearPins" class="btn small">Clear kept</button>
+        </div>
+      </div>
+      <div class="canvas-wrap graph"><canvas id="graph"></canvas></div>
+      <ul class="pins" id="pinList"></ul>
+    </section>
+  </main>
+
+  <footer class="app-footer">
+    A simplified physics model (lumped heat capacities, still air, 50% humidity). Good for comparing setups, not for lab-grade predictions.
+  </footer>
+
+  <script src="js/physics.js"></script>
+  <script src="js/renderer.js"></script>
+  <script src="js/chart.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
