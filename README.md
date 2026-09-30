@@ -25,6 +25,18 @@ the folder:
 python3 -m http.server 8000   # then visit http://localhost:8000
 ```
 
+## Hosting on GitHub Pages
+
+The workflow in `.github/workflows/pages.yml` publishes the site every time
+`main` is updated. You only need to set it up once:
+
+1. On GitHub, open the repository's **Settings → Pages**.
+2. Under **Build and deployment → Source**, choose **GitHub Actions**.
+3. Merge into `main`, or run the workflow by hand from the **Actions** tab.
+
+The site will then be live at
+`https://<your-username>.github.io/water-simulator-heat-loss/`.
+
 ## Project layout
 
 | File | What it does |
