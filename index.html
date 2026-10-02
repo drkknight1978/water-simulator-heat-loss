@@ -18,12 +18,12 @@
 
       <div class="control">
         <label for="waterTemp">Starting water temperature <output id="waterTempOut"></output></label>
-        <input type="range" id="waterTemp" min="1" max="100" step="1" value="85">
+        <input type="range" id="waterTemp" min="-20" max="100" step="1" value="85">
       </div>
 
       <div class="control">
         <label for="ambient">Room temperature <output id="ambientOut"></output></label>
-        <input type="range" id="ambient" min="-10" max="40" step="1" value="20">
+        <input type="range" id="ambient" min="-40" max="60" step="1" value="20">
       </div>
 
       <div class="control">
@@ -58,7 +58,8 @@
         <span>Pre-heat the container</span>
       </label>
 
-      <p class="hint">Changing the starting temperature, shape, size, material, thickness or pre-heat starts a new run. The lid and room temperature can be changed while it runs.</p>
+      <p class="hint">Changing the starting temperature, shape, size, material, thickness or pre-heat starts a new run. A starting temperature below 0 °C means the container starts full of ice.</p>
+      <p class="hint">The lid and room temperature can be changed while it runs. Try a room below 0 °C to freeze the water, then warm the room up to melt it again.</p>
     </section>
 
     <section class="panel stage" aria-label="Container view">
@@ -78,23 +79,35 @@
       <label class="inline-check"><input type="checkbox" id="showArrows" checked> Show heat-flow arrows</label>
     </section>
 
-    <section class="panel readouts" aria-labelledby="readouts-heading">
-      <h2 id="readouts-heading">Readouts</h2>
-      <div class="big-temp"><span id="tWater">--</span><span class="unit">°C</span></div>
-      <dl class="stats">
-        <dt>Cooling rate</dt><dd id="rate">--</dd>
-        <dt>Heat leaving water</dt><dd id="power">--</dd>
-        <dt>Wall temperature</dt><dd id="tWall">--</dd>
-        <dt id="tLidLabel">Lid temperature</dt><dd id="tLid">--</dd>
-        <dt>Energy lost</dt><dd id="energy">--</dd>
-        <dt>Water evaporated</dt><dd id="evap">--</dd>
-        <dt>Reached 60 °C</dt><dd id="m60">--</dd>
-        <dt>Reached 40 °C</dt><dd id="m40">--</dd>
-      </dl>
-      <h3>Where the heat is going</h3>
-      <div class="breakdown-bar" id="breakdownBar"></div>
-      <ul class="legend" id="breakdownLegend"></ul>
-    </section>
+    <div class="side">
+      <section class="panel molecules" aria-labelledby="mol-heading">
+        <h2 id="mol-heading">Molecular view</h2>
+        <div class="canvas-wrap mol"><canvas id="mol"></canvas></div>
+        <p class="mol-caption" id="molCaption"></p>
+      </section>
+
+      <section class="panel readouts" aria-labelledby="readouts-heading">
+        <h2 id="readouts-heading">Readouts</h2>
+        <div class="big-temp"><span id="tWater">--</span><span class="unit">°C</span></div>
+        <dl class="stats">
+          <dt>State</dt><dd id="phase">--</dd>
+          <dt>Temperature change</dt><dd id="rate">--</dd>
+          <dt id="powerLabel">Heat leaving water</dt><dd id="power">--</dd>
+          <dt>Wall temperature</dt><dd id="tWall">--</dd>
+          <dt id="tLidLabel">Lid temperature</dt><dd id="tLid">--</dd>
+          <dt id="energyLabel">Energy lost</dt><dd id="energy">--</dd>
+          <dt id="evapLabel">Water evaporated</dt><dd id="evap">--</dd>
+          <dt>Passed 60 °C</dt><dd id="m60">--</dd>
+          <dt>Passed 40 °C</dt><dd id="m40">--</dd>
+          <dt data-row="freeze" hidden>Started freezing</dt><dd id="mFreeze" data-row="freeze" hidden>--</dd>
+          <dt data-row="freeze" hidden>Frozen solid</dt><dd id="mFrozen" data-row="freeze" hidden>--</dd>
+          <dt data-row="thaw" hidden>Fully thawed</dt><dd id="mThawed" data-row="thaw" hidden>--</dd>
+        </dl>
+        <h3 id="breakdownTitle">Where the heat is going</h3>
+        <div class="breakdown-bar" id="breakdownBar"></div>
+        <ul class="legend" id="breakdownLegend"></ul>
+      </section>
+    </div>
 
     <section class="panel chart" aria-labelledby="chart-heading">
       <div class="chart-head">
@@ -115,6 +128,7 @@
 
   <script src="js/physics.js"></script>
   <script src="js/renderer.js"></script>
+  <script src="js/molecules.js"></script>
   <script src="js/chart.js"></script>
   <script src="js/main.js"></script>
 </body>

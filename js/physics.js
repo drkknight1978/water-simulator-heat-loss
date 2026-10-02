@@ -25,6 +25,8 @@
   const LEWIS_23 = Math.pow(0.85, 2 / 3); // (Lewis number)^(2/3) for water vapour in air
   const RELATIVE_HUMIDITY = 0.5;
   const MAX_DT = 5;                       // largest internal time step, s
+  const ICE_CP = 2090;                    // specific heat of ice, J/kg·K
+  const LATENT_FUSION = 334000;           // energy to melt 1 kg of ice at 0 °C, J/kg
 
   // k: conductivity W/m·K, rho: density kg/m³, cp: J/kg·K, eps: emissivity.
   // color/opacity are only used for drawing.
@@ -144,6 +146,48 @@
     return lidGapFlux(Tw, Ts, lidEps, L) / dT;
   }
 
+  // ---- Freezing and melting -------------------------------------------------
+  /*
+   * Water is tracked by its enthalpy H: the heat content measured from liquid
+   * water at 0 °C. That makes a phase change easy to handle, because there is
+   * a flat stretch in the middle where heat goes into (or out of) the ice and
+   * the temperature does not move:
+   *
+   *    liquid, above 0 °C :  H = m·cp·T                 (H > 0)
+   *    freezing / melting :  H = −m·L·ice, T stays 0 °C (−m·L ≤ H ≤ 0)
+   *    solid ice, below 0 :  H = −m·L + m·cpIce·T       (H < −m·L)
+   *
+   * To add heat we convert the state to H, add the energy, and convert back.
+   */
+  function enthalpy(w) {
+    if (w.T > 0) return w.mass * WATER_CP * w.T;
+    if (w.T < 0) return w.mass * (-LATENT_FUSION + ICE_CP * w.T);
+    return -w.mass * LATENT_FUSION * w.ice;
+  }
+
+  function addEnergy(w, joules) {
+    const H = enthalpy(w) + joules;
+    const m = w.mass;
+    if (H > 0) {
+      w.T = H / (m * WATER_CP);
+      w.ice = 0;
+    } else if (H >= -m * LATENT_FUSION) {
+      w.T = 0;
+      w.ice = -H / (m * LATENT_FUSION);
+    } else {
+      w.T = (H + m * LATENT_FUSION) / (m * ICE_CP);
+      w.ice = 1;
+    }
+  }
+
+  // Heat needed per degree right now (J/K), or null while the water sits at
+  // 0 °C and all the heat is going into freezing or melting.
+  function heatCapacity(w) {
+    if (w.T > 0) return w.mass * WATER_CP;
+    if (w.T < 0) return w.mass * ICE_CP;
+    return null;
+  }
+
   // ---- Simulation state -----------------------------------------------------
 
   function panelDefs(geo, lidded) {
@@ -169,11 +213,13 @@
     const state = {
       t: 0,
       geo,
-      water: { T: cfg.waterTemp, mass, startMass: mass, startT: cfg.waterTemp },
+      // ice is the fraction of the water that is frozen (0 = liquid, 1 = solid).
+      // A starting temperature below 0 °C means the container starts full of ice.
+      water: { T: cfg.waterTemp, ice: cfg.waterTemp < 0 ? 1 : 0, mass, startMass: mass, startT: cfg.waterTemp },
       nodes: { side: freshNode(wallStart), bottom: freshNode(wallStart), lid: freshNode(wallStart) },
       energyLost: 0,   // J that have left the water
       evaporated: 0,   // kg of water gone as vapour
-      milestones: {},  // time (s) at which the water first dropped below 60 °C, 40 °C
+      milestones: {},  // time (s) of the first crossing of 60 °C / 40 °C, and of freezing events
       history: [{ t: 0, T: cfg.waterTemp }],
       sampleEvery: 2,  // seconds of sim time between stored graph points
       nextSample: 2,
@@ -226,9 +272,12 @@
       top.rad = WATER_EPS * SIGMA * A * (Math.pow(kelvin(Tw), 4) - Math.pow(kelvin(Ta), 4));
       // Evaporation: vapour diffuses from saturated air at the surface into
       // the room (which is only partly humid). Even room-temperature water
-      // evaporates a little, so it can cool slightly below the room.
+      // evaporates a little, so it can cool slightly below the room. If the
+      // water is colder than the room's dew point the flow reverses: vapour
+      // condenses onto the surface and releases its latent heat (negative
+      // mdot). A frozen surface neither evaporates nor condenses much here.
       const hm = Math.max(2, hc) / (AIR_RHO_CP * LEWIS_23);
-      top.mdot = Math.max(0, hm * A * (vapourDensity(Tw) - vapourDensity(Ta, RELATIVE_HUMIDITY)));
+      top.mdot = (1 - state.water.ice) * hm * A * (vapourDensity(Tw) - vapourDensity(Ta, RELATIVE_HUMIDITY));
       top.evap = top.mdot * latentHeat(Tw);
     }
 
@@ -249,12 +298,18 @@
     }
   }
 
-  function checkMilestones(state, before, after) {
+  // Record the first time each event happens: crossing 60 °C or 40 °C in either
+  // direction (cooling down or warming up), and the stages of freezing/thawing.
+  function checkMilestones(state, before) {
+    const after = state.water;
+    const ms = state.milestones;
     for (const mark of [60, 40]) {
-      if (state.milestones[mark] === undefined && before > mark && after <= mark) {
-        state.milestones[mark] = state.t;
-      }
+      const crossed = (before.T > mark && after.T <= mark) || (before.T < mark && after.T >= mark);
+      if (ms[mark] === undefined && crossed) ms[mark] = state.t;
     }
+    if (ms.freezeStart === undefined && before.ice === 0 && after.ice > 0) ms.freezeStart = state.t;
+    if (ms.frozen === undefined && before.ice < 1 && after.ice >= 1) ms.frozen = state.t;
+    if (ms.thawed === undefined && before.ice > 0 && after.ice === 0) ms.thawed = state.t;
   }
 
   /*
@@ -278,15 +333,16 @@
         n.Tsi = Tw - p.qin / (p.hin * p.A);
         n.Tso = cfg.ambient + p.qout / (p.hout * p.A);
       }
-      const qLeaving = f.total;
-      water.T -= (dt * qLeaving) / (water.mass * WATER_CP);
+      const qLeaving = f.total; // negative when the room is warming the water
+      const before = { T: water.T, ice: water.ice };
+      addEnergy(water, -qLeaving * dt);
       water.mass = Math.max(water.startMass * 0.02, water.mass - f.top.mdot * dt);
 
       state.energyLost += qLeaving * dt;
       state.evaporated += f.top.mdot * dt;
       state.t += dt;
       remaining -= dt;
-      checkMilestones(state, Tw, water.T);
+      checkMilestones(state, before);
       recordHistory(state);
       state.last = f;
     }
@@ -295,7 +351,8 @@
 
   const api = {
     MATERIALS, SHAPES, geometry, createState, advance, placeLid, computeFlows,
-    constants: { WATER_CP, RELATIVE_HUMIDITY },
+    enthalpy, heatCapacity,
+    constants: { WATER_CP, ICE_CP, LATENT_FUSION, RELATIVE_HUMIDITY },
   };
   global.HeatSim = api;
   if (typeof module !== 'undefined') module.exports = api;

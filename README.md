@@ -2,14 +2,23 @@
 
 An interactive browser simulation of a container of hot water cooling down.
 
-- **Controls:** starting water temperature, room temperature, container shape
+- **Controls:** starting water temperature (below 0 °C starts as ice), room
+  temperature (-40 to 60 °C), container shape
   (mug, wide dish, tall column, cube, sphere), size (50 mL – 20 L), material
   (glass, ceramic, plastic, stainless steel, aluminium, copper, polystyrene foam,
   vacuum-insulated steel), wall thickness (0.5 – 20 mm), lid on/off, and
   pre-heating the container.
 - **Visuals:** a cut-away view where the water, walls and lid are coloured by
-  temperature, with steam, condensation under the lid and heat-flow arrows
-  labelled in watts.
+  temperature, with steam, condensation under the lid, ice forming from the
+  surface down, and heat-flow arrows labelled in watts. The arrows point
+  inwards when a warm room is heating the water.
+- **Molecular view:** a small window of H₂O molecules. They move faster and turn
+  red as the water heats up, slow down and turn blue as it cools, and lock into
+  a bonded crystal lattice when it freezes. On-screen speeds are exaggerated;
+  the readout under it shows the real average molecular speed.
+- **Freezing and warming:** in a room below 0 °C the water cools to 0 °C, holds
+  there while it freezes, then the ice cools further. Raise the room
+  temperature at any time to melt the ice and warm the water up again.
 - **Time controls:** play/pause, reset, speeds from real time up to 3 hours per
   second, and +10 min / +1 h jumps.
 - **Readouts and chart:** cooling rate, heat loss, energy lost, water
@@ -43,6 +52,7 @@ The site will then be live at
 | --- | --- |
 | `js/physics.js` | The heat-transfer model. It has no DOM code, so it also runs in Node. |
 | `js/renderer.js` | Draws the container, water, steam and arrows on a canvas. |
+| `js/molecules.js` | The molecular view: moving, colour-coded molecules and the ice lattice. |
 | `js/chart.js` | Draws the temperature-over-time chart. |
 | `js/main.js` | Connects the controls to the model and runs the animation loop. |
 | `css/style.css` | Layout, with light and dark themes and a phone layout. |
@@ -65,6 +75,13 @@ water ─► side wall ─► room
   thermal radiation (`ε σ T⁴`). Each panel also **stores heat**, so a thick cold
   ceramic mug takes a lot of heat from the water at the start. Pre-heating the
   container removes that effect.
+- **Freezing and melting:** the water's heat content (enthalpy) is tracked rather
+  than just its temperature. Between 0 °C liquid and 0 °C ice there is a flat
+  stretch worth 334 kJ per kg, so the temperature holds at 0 °C while heat goes
+  into freezing or melting. Ice then cools or warms with its own specific heat.
+- **Warming up:** if the room is warmer than the water, every flow reverses and
+  heat comes in through the walls, lid and surface. Cold water in a humid room
+  can also gain a little water from condensation.
 - **Open top:** the water surface loses heat by convection, radiation and
   **evaporation**. Evaporation uses the heat/mass-transfer (Lewis) analogy with
   50% room humidity, and is usually the largest loss for hot, open water. The
@@ -76,7 +93,7 @@ water ─► side wall ─► room
   responding panel (a thin copper wall reacts in seconds), so high time speeds
   stay stable.
 
-Simplifications: still air, the whole water volume is at one temperature, the
+Simplifications: still air, ice forms as a layer from the top and does not insulate the rest of the water, no supercooling, the whole water volume is at one temperature, the
 bottom loses heat into air rather than into the table, and walls are treated as
 thin compared with the container. The results are realistic enough to compare
 setups. For example, a 300 mL ceramic mug cools from 85 °C to 60 °C in about 13

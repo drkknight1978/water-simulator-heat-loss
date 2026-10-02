@@ -1,8 +1,8 @@
 /*
  * renderer.js — draws the container as a cut-away side view on a <canvas>.
  * Colours show temperature: the water, each wall panel and the lid are tinted
- * from blue (cold) to red (hot). Steam, condensation drops and heat-flow
- * arrows are drawn on top.
+ * from blue (cold) to red (hot). Ice grows down from the surface as the water
+ * freezes. Steam, condensation drops and heat-flow arrows are drawn on top.
  */
 (function (global) {
   'use strict';
@@ -41,6 +41,11 @@
     return a.map((v, i) => Math.round(v + (b[i] - v) * f));
   }
 
+  // Ice is pale blue-white, and bluer the colder it gets.
+  function iceRGB(T) {
+    return mix([214, 240, 255], [120, 175, 245], Math.min(1, Math.max(0, -T / 40)));
+  }
+
   function cssVar(name) {
     return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   }
@@ -74,7 +79,8 @@
       const geo = state.geo;
       const L = cfg.thickness / 1000;
       const tableY = this.h * 0.84;
-      const fitW = (this.w * 0.62) / (geo.width + 2 * L);
+      // Leave room either side for the heat-flow labels, more so on a narrow screen
+      const fitW = (this.w * (this.w < 500 ? 0.5 : 0.62)) / (geo.width + 2 * L);
       const fitH = (this.h * 0.55) / (geo.height + 2 * L);
       const s = Math.min(fitW, fitH);
       const realWall = L * s;
@@ -136,8 +142,48 @@
       return g;
     }
 
+    // Water level as a fraction of the container (condensation can add a little)
     waterLevel(state) {
-      return state.water.mass / state.water.startMass;
+      return Math.min(1, state.water.mass / state.water.startMass);
+    }
+
+    // A block of ice with a few cracks. `h` is how deep the ice reaches below
+    // the surface; while only part of the water is frozen, its lower edge is
+    // the freezing front.
+    drawIceBlock(x, y, w, h, T, partial) {
+      if (h < 1) return;
+      const ctx = this.ctx;
+      const c = iceRGB(T);
+      const g = ctx.createLinearGradient(0, y, 0, y + h);
+      g.addColorStop(0, rgba(mix(c, [255, 255, 255], 0.35), 0.95));
+      g.addColorStop(1, rgba(c, 0.92));
+      ctx.fillStyle = g;
+      ctx.fillRect(x, y, w, h);
+      // Cracks: fixed zig-zags, so they don't flicker from frame to frame
+      ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (let i = 0; i < 5; i++) {
+        let cx = x + w * (0.12 + i * 0.19);
+        let cy = y + 2;
+        ctx.moveTo(cx, cy);
+        while (cy < y + h - 4) {
+          cx += (((i * 7 + Math.round(cy)) % 3) - 1) * 5;
+          cy += 10 + ((i * 5) % 7);
+          ctx.lineTo(Math.min(x + w - 2, Math.max(x + 2, cx)), Math.min(y + h, cy));
+        }
+      }
+      ctx.stroke();
+      if (partial) { // slushy, uneven freezing front
+        ctx.strokeStyle = 'rgba(255,255,255,0.8)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        for (let px = x; px <= x + w; px += 4) {
+          const py = y + h + Math.sin(px * 0.35) * 1.5;
+          if (px === x) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+        }
+        ctx.stroke();
+      }
     }
 
     // Cylinders and boxes: a U-shaped wall, water inside, optional lid.
@@ -153,17 +199,21 @@
       const surfY = yBot - ih * level;
       ctx.fillStyle = this.waterGradient(state.water.T, surfY, yBot);
       ctx.fillRect(x0, surfY, iw, yBot - surfY);
+      const ice = state.water.ice;
+      this.drawIceBlock(x0, surfY, iw, (yBot - surfY) * ice, state.water.T, ice < 1);
+      const surfaceColour = ice > 0
+        ? rgba(mix(iceRGB(state.water.T), [255, 255, 255], 0.5), 0.95)
+        : rgba(mix(tempRGB(state.water.T), [255, 255, 255], 0.45), 0.9);
+      ctx.fillStyle = surfaceColour;
       if (cyl) {
         ctx.beginPath();
         ctx.ellipse((x0 + x1) / 2, surfY, iw / 2, ellH, 0, 0, Math.PI * 2);
-        ctx.fillStyle = rgba(mix(tempRGB(state.water.T), [255, 255, 255], 0.45), 0.9);
         ctx.fill();
       } else {
-        ctx.fillStyle = rgba(mix(tempRGB(state.water.T), [255, 255, 255], 0.45), 0.9);
         ctx.fillRect(x0, surfY - 1, iw, 3);
       }
-      // Gentle shimmer on an open surface
-      if (!cfg.lidded) {
+      // Gentle shimmer on an open liquid surface
+      if (!cfg.lidded && ice < 0.05) {
         ctx.strokeStyle = 'rgba(255,255,255,0.35)';
         ctx.lineWidth = 1;
         ctx.beginPath();
@@ -234,6 +284,8 @@
       ctx.clip();
       ctx.fillStyle = this.waterGradient(state.water.T, surfY, lay.yBot);
       ctx.fillRect(cx - R, surfY, 2 * R, lay.yBot - surfY);
+      const ice = state.water.ice;
+      this.drawIceBlock(cx - R, surfY, 2 * R, (lay.yBot - surfY) * ice, state.water.T, ice < 1);
       ctx.restore();
 
       // Wall ring with an opening
@@ -290,7 +342,7 @@
       const top = state.last.top;
       if (!cfg.lidded && src && state.geo.top > 0) {
         const flux = top.evap / state.geo.top; // W/m²
-        const rate = Math.min(60, flux / 60);  // particles per real second
+        const rate = Math.max(0, Math.min(60, flux / 60)); // particles per real second (none when condensing)
         this.spawnDebt = (this.spawnDebt || 0) + rate * realDt;
         while (this.spawnDebt >= 1) {
           this.spawnDebt -= 1;
@@ -319,22 +371,29 @@
       }
     }
 
-    arrow(x, y, dx, dy, len, alpha, label) {
+    /*
+     * One heat-flow arrow. (x, y) is the end next to the container and (dx, dy)
+     * points away from it. Heat leaving draws the arrowhead on the far end;
+     * heat arriving (a warm room heating the water) flips it to point inwards.
+     */
+    arrow(x, y, dx, dy, len, alpha, label, inward = false) {
       const ctx = this.ctx;
-      const x2 = x + dx * len;
-      const y2 = y + dy * len;
+      const far = { x: x + dx * len, y: y + dy * len };
+      const from = inward ? far : { x, y };
+      const to = inward ? { x, y } : far;
+      const ux = inward ? -dx : dx, uy = inward ? -dy : dy; // direction of travel
       ctx.strokeStyle = `rgba(249,115,22,${alpha})`;
       ctx.fillStyle = `rgba(249,115,22,${alpha})`;
       ctx.lineWidth = 3;
       ctx.beginPath();
-      ctx.moveTo(x, y);
-      ctx.lineTo(x2, y2);
+      ctx.moveTo(from.x, from.y);
+      ctx.lineTo(to.x, to.y);
       ctx.stroke();
-      const hx = -dy, hy = dx; // perpendicular
+      const hx = -uy, hy = ux; // perpendicular
       ctx.beginPath();
-      ctx.moveTo(x2 + dx * 7, y2 + dy * 7);
-      ctx.lineTo(x2 + hx * 6, y2 + hy * 6);
-      ctx.lineTo(x2 - hx * 6, y2 - hy * 6);
+      ctx.moveTo(to.x + ux * 7, to.y + uy * 7);
+      ctx.lineTo(to.x + hx * 6, to.y + hy * 6);
+      ctx.lineTo(to.x - hx * 6, to.y - hy * 6);
       ctx.closePath();
       ctx.fill();
       if (label) {
@@ -342,19 +401,21 @@
         ctx.fillStyle = cssVar('--text');
         ctx.textAlign = dx < 0 ? 'right' : dx > 0 ? 'left' : 'center';
         ctx.textBaseline = dy < 0 ? 'bottom' : dy > 0 ? 'top' : 'middle';
-        ctx.fillText(label, x2 + dx * 12, y2 + dy * 12);
+        ctx.fillText(label, far.x + dx * 12, far.y + dy * 12);
       }
     }
 
     /*
-     * Arrows show heat leaving each surface into the room. Length grows with
-     * the heat flux (W per m²) so surfaces can be compared at a glance.
+     * Arrows show heat flowing between each surface and the room. Length grows
+     * with the heat flux (W per m²) so surfaces can be compared at a glance.
+     * They point outwards when the water is losing heat and inwards when the
+     * room is warming it.
      */
     drawArrows(state, cfg, lay) {
       const f = state.last;
-      const len = (q, A) => 10 + Math.min(45, Math.sqrt(Math.max(0, q / A)) * 1.2);
-      const alpha = (q) => (q > 0.05 ? 0.9 : 0.25);
-      const fmt = (q) => `${q.toFixed(q < 10 ? 1 : 0)} W`;
+      const len = (q, A) => 10 + Math.min(45, Math.sqrt(Math.abs(q) / A) * 1.2);
+      const alpha = (q) => (Math.abs(q) > 0.05 ? 0.9 : 0.25);
+      const fmt = (q) => `${Math.abs(q).toFixed(Math.abs(q) < 10 ? 1 : 0)} W`;
       const byKey = Object.fromEntries(f.panels.map((p) => [p.key, p]));
       const midY = (lay.yTop + lay.yBot) / 2;
       const sphere = state.geo.kind === 'sphere';
@@ -363,30 +424,34 @@
       const side = byKey.side;
       if (side) {
         const l = len(side.qout, side.A);
-        const edge = lay.wall + 6;
+        const edge = lay.wall + 9;
         const y = sphere ? lay.yBot - R : midY;
-        this.arrow(lay.x0 - edge, y, -1, 0, l, alpha(side.qout), fmt(side.qout / 2));
-        this.arrow(lay.x1 + edge, y, 1, 0, l, alpha(side.qout), fmt(side.qout / 2));
+        const inward = side.qout < 0;
+        this.arrow(lay.x0 - edge, y, -1, 0, l, alpha(side.qout), fmt(side.qout / 2), inward);
+        this.arrow(lay.x1 + edge, y, 1, 0, l, alpha(side.qout), fmt(side.qout / 2), inward);
       }
       const topQ = cfg.lidded ? (byKey.lid ? byKey.lid.qout : 0) : f.top.conv + f.top.rad + f.top.evap;
       const topY = sphere ? this.steamSource.exitY - lay.wall - 12 : lay.yTop - lay.wall - 14;
-      this.arrow(lay.cx + (sphere ? R * 0.55 : lay.iw * 0.3), topY, 0, -1, len(topQ, state.geo.top), alpha(topQ), fmt(topQ));
+      this.arrow(lay.cx + (sphere ? R * 0.55 : lay.iw * 0.3), topY, 0, -1, len(topQ, state.geo.top), alpha(topQ), fmt(topQ), topQ < 0);
       // The bottom sits on the table, so its heat flow is shown as a label only.
-      if (byKey.bottom) this.labelBottom(lay, fmt(byKey.bottom.qout));
+      if (byKey.bottom) this.labelBottom(lay, fmt(byKey.bottom.qout), byKey.bottom.qout < 0);
     }
 
-    labelBottom(lay, label) {
+    labelBottom(lay, label, inward) {
       const ctx = this.ctx;
       ctx.font = '600 12px system-ui, sans-serif';
       ctx.fillStyle = cssVar('--text');
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
-      ctx.fillText(`↓ ${label}`, lay.x1 + lay.wall + 8, lay.yBot + lay.wall / 2);
+      ctx.fillText(`${inward ? '↑' : '↓'} ${label}`, lay.x1 + lay.wall + 8, lay.yBot + lay.wall / 2);
     }
 
     drawLabels(state, cfg, lay) {
       const ctx = this.ctx;
-      const text = `${state.water.T.toFixed(1)} °C`;
+      const ice = state.water.ice;
+      let text = `${state.water.T.toFixed(1)} °C`;
+      if (ice >= 1) text += ' · ice';
+      else if (ice > 0) text += ` · ${Math.round(ice * 100)}% ice`;
       const cy = state.geo.kind === 'sphere' ? lay.yBot - lay.iw / 2 + lay.iw * 0.15 : (lay.yTop + lay.yBot) / 2 + lay.ih * 0.1;
       ctx.font = '700 16px system-ui, sans-serif';
       const tw = ctx.measureText(text).width;

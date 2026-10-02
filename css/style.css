@@ -58,12 +58,15 @@ body {
   grid-template-areas:
     "controls stage readouts"
     "controls chart readouts";
+  /* The right-hand column is the tallest; let spare height collect under the
+     chart instead of opening a gap between the container view and the chart. */
+  grid-template-rows: auto 1fr;
   align-items: start;
 }
 
 .controls { grid-area: controls; }
 .stage { grid-area: stage; }
-.readouts { grid-area: readouts; }
+.side { grid-area: readouts; display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .chart { grid-area: chart; }
 
 @media (max-width: 1100px) {
@@ -80,8 +83,13 @@ body {
   .layout {
     padding: 12px 16px;
     grid-template-columns: minmax(0, 1fr);
-    grid-template-areas: "stage" "controls" "readouts" "chart";
+    grid-template-areas: "stage" "molecules" "controls" "readouts" "chart";
   }
+  /* On phones the molecule window and readouts become separate rows so the
+     molecules sit right under the container view. */
+  .side { display: contents; }
+  .molecules { grid-area: molecules; }
+  .readouts { grid-area: readouts; }
 }
 
 .panel {
@@ -163,12 +171,16 @@ select {
 .canvas-wrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 .canvas-wrap.scene { height: 440px; border-radius: 10px; overflow: hidden; }
 .canvas-wrap.graph { height: 260px; }
+.canvas-wrap.mol { height: 200px; border-radius: 8px; overflow: hidden; background: #0c1424; }
 @media (max-width: 680px) {
   .canvas-wrap.scene { height: 360px; }
   .canvas-wrap.graph { height: 220px; }
 }
 
 .inline-check { display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 0.85rem; color: var(--muted); }
+
+.mol-caption { margin: 10px 0 0; font-size: 0.8rem; color: var(--muted); min-height: 3.6em; }
+.mol-caption strong { color: var(--text); }
 
 /* ---- Readouts ---- */
 .big-temp { font-size: 2.8rem; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }

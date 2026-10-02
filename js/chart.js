@@ -56,7 +56,7 @@
       // clipped to the same window so they line up with the current one.
       const tMax = Math.max(600, state.t * 1.05);
       let lo = Math.min(cfg.ambient, state.water.T);
-      let hi = Math.max(state.water.startT, cfg.ambient);
+      let hi = Math.max(state.water.startT, state.water.T, cfg.ambient);
       for (const p of pins) {
         for (const pt of p.history) { lo = Math.min(lo, pt.T); hi = Math.max(hi, pt.T); }
       }
@@ -87,8 +87,9 @@
       }
 
       // Reference lines: room temperature and 60 °C "drinkable"
-      this.refLine(Y(cfg.ambient), pad, pw, `room ${cfg.ambient}°`, cssVar('--muted'));
-      if (60 > lo && 60 < hi) this.refLine(Y(60), pad, pw, 'drinkable 60°', '#f59e0b');
+      this.refLine(Y(cfg.ambient), pad, pw, `room ${cfg.ambient}°`, cssVar('--muted'), 'above');
+      if (0 > lo && 0 < hi && cfg.ambient !== 0) this.refLine(Y(0), pad, pw, 'freezing 0°', '#38bdf8', 'above');
+      if (60 > lo && 60 < hi) this.refLine(Y(60), pad, pw, 'drinkable 60°', '#f59e0b', 'above');
 
       // Kept runs, then the live one on top
       ctx.save();
@@ -106,7 +107,9 @@
       ctx.fill();
     }
 
-    refLine(y, pad, pw, label, color) {
+    // `side` puts the label above the line, or below it when the line is near
+    // the top of the chart (a hot room would otherwise push it off the edge).
+    refLine(y, pad, pw, label, color, side) {
       const ctx = this.ctx;
       ctx.save();
       ctx.setLineDash([5, 4]);
@@ -115,8 +118,9 @@
       ctx.restore();
       ctx.fillStyle = color;
       ctx.textAlign = 'right';
-      ctx.textBaseline = 'bottom';
-      ctx.fillText(label, pad.l + pw - 4, y - 2);
+      const flip = side === 'above' && y - pad.t < 14;
+      ctx.textBaseline = flip ? 'top' : 'bottom';
+      ctx.fillText(label, pad.l + pw - 4, flip ? y + 2 : y - 2);
     }
 
     line(points, X, Y, color, width, tMax) {

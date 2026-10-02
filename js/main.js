@@ -1,7 +1,8 @@
 /*
  * main.js — connects the controls to the simulation and runs the animation
  * loop. Each frame advances the physics by (real seconds × speed), then
- * redraws the container; readouts and the chart refresh 10 times a second.
+ * redraws the container and the molecular view; readouts and the chart
+ * refresh 10 times a second.
  */
 (function () {
   'use strict';
@@ -63,7 +64,7 @@
   }
 
   function updateOutputs() {
-    $('waterTempOut').textContent = `${$('waterTemp').value} °C`;
+    $('waterTempOut').textContent = `${$('waterTemp').value} °C${cfg.waterTemp < 0 ? ' (ice)' : ''}`;
     $('ambientOut').textContent = `${$('ambient').value} °C`;
     $('sizeOut').textContent = fmtVolume(cfg.volume);
     $('thicknessOut').textContent = `${$('thickness').value} mm`;
@@ -77,6 +78,7 @@
 
   const scene = new SceneRenderer($('scene'));
   const chart = new TempChart($('graph'));
+  const molecules = new MoleculeView($('mol'));
 
   function restart() {
     cfg = readConfig();
@@ -135,7 +137,7 @@
 
   // ---- Kept curves for comparison ----
   function describe(c) {
-    return `${SHAPES[c.shape].name.split(' (')[0]}, ${fmtVolume(c.volume)}, ${MATERIALS[c.material].name.split(' (')[0].toLowerCase()} ${c.thickness} mm, ${c.lidded ? 'lid' : 'open'}, from ${c.waterTemp}°C`;
+    return `${SHAPES[c.shape].name.split(' (')[0]}, ${fmtVolume(c.volume)}, ${MATERIALS[c.material].name.split(' (')[0].toLowerCase()} ${c.thickness} mm, ${c.lidded ? 'lid' : 'open'}, from ${c.waterTemp}°C in a ${c.ambient}°C room`;
   }
 
   function renderPins() {
@@ -177,40 +179,86 @@
 
   function breakdownItems() {
     const f = state.last;
-    const names = { side: 'Side walls', bottom: 'Bottom', lid: 'Into the lid' };
+    const names = { side: 'Side walls', bottom: 'Bottom', lid: 'Through the lid' };
     const items = f.panels.map((p) => ({ key: p.key, label: names[p.key], w: p.qin }));
     if (!cfg.lidded) {
-      items.push({ key: 'evap', label: 'Evaporation (steam)', w: f.top.evap });
-      items.push({ key: 'conv', label: 'Air convection off surface', w: f.top.conv });
-      items.push({ key: 'rad', label: 'Radiation off surface', w: f.top.rad });
+      items.push({ key: 'evap', label: f.top.evap >= 0 ? 'Evaporation (steam)' : 'Condensation on surface', w: f.top.evap });
+      items.push({ key: 'conv', label: 'Air convection at surface', w: f.top.conv });
+      items.push({ key: 'rad', label: 'Radiation at surface', w: f.top.rad });
     }
     return items;
+  }
+
+  function phaseText() {
+    const w = state.water;
+    if (w.ice >= 1) return `Solid ice (${w.T.toFixed(1)} °C)`;
+    if (w.ice > 0) return `${state.last.total >= 0 ? 'Freezing' : 'Melting'}: ${Math.round(w.ice * 100)}% ice`;
+    return 'Liquid water';
+  }
+
+  // Rows for freezing and thawing only appear when they matter.
+  function showRows(name, visible) {
+    for (const el of document.querySelectorAll(`[data-row="${name}"]`)) el.hidden = !visible;
+  }
+
+  function moleculeCaption() {
+    const w = state.water;
+    const pct = Math.round(w.ice * 100);
+    const speed = Math.round(moleculeRealSpeed(w.T));
+    if (w.ice >= 1) return '<strong>Frozen:</strong> the molecules are locked into a crystal and can only vibrate on the spot.';
+    if (w.ice > 0) return `<strong>${state.last.total >= 0 ? 'Freezing' : 'Melting'}:</strong> ${pct}% of the molecules are locked into the crystal. The rest still average about ${speed} m/s.`;
+    return `Average speed about <strong>${speed} m/s</strong>. On screen the speeds are exaggerated so the difference between hot and cold is easy to see.`;
   }
 
   function refreshUI() {
     const f = state.last;
     const w = state.water;
+    const ms = state.milestones;
     $('clock').textContent = fmtClock(state.t);
     $('tWater').textContent = w.T.toFixed(1);
-    const rate = (f.total / (w.mass * HeatSim.constants.WATER_CP)) * 60;
-    $('rate').textContent = `${rate >= 0 ? '−' : '+'}${Math.abs(rate).toFixed(rate < 0.1 ? 3 : 2)} °C/min`;
-    $('power').textContent = `${f.total.toFixed(f.total < 10 ? 2 : 1)} W`;
+    $('phase').textContent = phaseText();
+
+    // While the water sits at 0 °C, heat goes into freezing or melting, not temperature.
+    const C = HeatSim.heatCapacity(w);
+    if (C === null) {
+      $('rate').textContent = 'holding at 0 °C';
+    } else {
+      const change = (-f.total / C) * 60; // °C per minute
+      $('rate').textContent = `${change < 0 ? '−' : '+'}${Math.abs(change).toFixed(Math.abs(change) < 0.1 ? 3 : 2)} °C/min`;
+    }
+    $('powerLabel').textContent = f.total >= 0 ? 'Heat leaving water' : 'Heat entering water';
+    $('power').textContent = `${Math.abs(f.total).toFixed(Math.abs(f.total) < 10 ? 2 : 1)} W`;
     $('tWall').textContent = `${state.nodes.side.T.toFixed(1)} °C`;
     $('tLid').textContent = cfg.lidded ? `${state.nodes.lid.T.toFixed(1)} °C` : 'no lid';
-    $('energy').textContent = `${(state.energyLost / 1000).toFixed(1)} kJ`;
-    $('evap').textContent = `${(state.evaporated * 1000).toFixed(1)} g`;
-    $('m60').textContent = w.startT > 60 ? fmtDuration(state.milestones[60]) : 'started below';
-    $('m40').textContent = w.startT > 40 ? fmtDuration(state.milestones[40]) : 'started below';
+    $('energyLabel').textContent = state.energyLost >= 0 ? 'Energy lost' : 'Energy gained';
+    $('energy').textContent = `${(Math.abs(state.energyLost) / 1000).toFixed(1)} kJ`;
+    $('evapLabel').textContent = state.evaporated >= 0 ? 'Water evaporated' : 'Water condensed';
+    $('evap').textContent = `${Math.abs(state.evaporated * 1000).toFixed(1)} g`;
 
-    const items = breakdownItems();
-    const sum = items.reduce((s, i) => s + Math.max(0, i.w), 0) || 1;
+    $('m60').textContent = fmtDuration(ms[60]);
+    $('m40').textContent = fmtDuration(ms[40]);
+    const freezing = cfg.ambient < 0 || w.ice > 0 || ms.freezeStart !== undefined || ms.frozen !== undefined;
+    showRows('freeze', freezing);
+    showRows('thaw', w.ice > 0 || ms.thawed !== undefined);
+    $('mFreeze').textContent = fmtDuration(ms.freezeStart);
+    $('mFrozen').textContent = w.startT < 0 ? 'started frozen' : fmtDuration(ms.frozen);
+    $('mThawed').textContent = fmtDuration(ms.thawed);
+
+    // Heat breakdown. Items are signed relative to the overall direction of
+    // flow, so a flow working against it (e.g. evaporation cooling water that
+    // the room is warming) shows as negative and is left out of the bar.
+    const dir = f.total >= 0 ? 1 : -1;
+    $('breakdownTitle').textContent = dir > 0 ? 'Where the heat is going' : 'Where the heat is coming from';
+    const items = breakdownItems().map((i) => ({ ...i, w: i.w * dir }));
+    const sum = items.reduce((t, i) => t + Math.max(0, i.w), 0) || 1;
     $('breakdownBar').innerHTML = items
       .map((i) => `<span style="width:${(Math.max(0, i.w) / sum) * 100}%;background:${BREAKDOWN_COLORS[i.key]}" title="${i.label}"></span>`)
       .join('');
     $('breakdownLegend').innerHTML = items
-      .map((i) => `<li><span class="dot" style="background:${BREAKDOWN_COLORS[i.key]}"></span>${i.label}<span class="val">${i.w.toFixed(1)} W · ${Math.round((Math.max(0, i.w) / sum) * 100)}%</span></li>`)
+      .map((i) => `<li><span class="dot" style="background:${BREAKDOWN_COLORS[i.key]}"></span>${i.label}<span class="val">${i.w < 0 ? '−' : ''}${Math.abs(i.w).toFixed(1)} W${i.w > 0 ? ` · ${Math.round((i.w / sum) * 100)}%` : ''}</span></li>`)
       .join('');
 
+    $('molCaption').innerHTML = moleculeCaption();
     chart.draw(state, cfg, pins);
     renderPins();
   }
@@ -223,6 +271,7 @@
     lastFrame = now;
     if (playing) HeatSim.advance(state, cfg, realDt * speed);
     scene.draw(state, cfg, realDt);
+    molecules.update(realDt, state);
     if (now - lastUI > 100) {
       refreshUI();
       lastUI = now;
@@ -233,6 +282,7 @@
   new ResizeObserver(() => {
     scene.resize();
     chart.resize();
+    molecules.resize();
     refreshUI();
   }).observe(document.querySelector('.layout'));
 
